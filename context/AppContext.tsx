@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
 } from "react"
+import { toast } from "react-hot-toast"
 
 import type { AppState, Project, ProjectStatus, Task, TeamMember } from "@/lib/types"
 
@@ -48,6 +49,89 @@ interface AppContextValue extends AppState {
 const AppContext = createContext<AppContextValue | null>(null)
 
 const clamp = (value: number, min = 0, max = 100) => Math.min(max, Math.max(min, value))
+
+const extractResponseMessage = async (response: Response): Promise<string | null> => {
+  const cloned = response.clone()
+  const contentType = cloned.headers.get("content-type") ?? ""
+
+  if (contentType.includes("application/json")) {
+    try {
+      const data = await cloned.json()
+      if (typeof data === "string") {
+        const trimmed = data.trim()
+        return trimmed.length > 0 ? trimmed : null
+      }
+      if (data && typeof data === "object") {
+        for (const key of ["message", "error", "detail"]) {
+          const value = (data as Record<string, unknown>)[key]
+          if (typeof value === "string" && value.trim().length > 0) {
+            return value.trim()
+          }
+        }
+      }
+    } catch {
+      return null
+    }
+  }
+
+  try {
+    const text = await cloned.text()
+    const trimmed = text.trim()
+    return trimmed.length > 0 ? trimmed : null
+  } catch {
+    return null
+  }
+}
+
+const ensureResponseSuccess = async (response: Response, fallback: string) => {
+  if (response.ok) {
+    return
+  }
+
+  const message = (await extractResponseMessage(response)) ?? fallback
+  throw new Error(message)
+}
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && typeof error.message === "string" && error.message.trim().length > 0) {
+    return error.message
+  }
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error.trim()
+  }
+  return fallback
+}
+
+type ToastMessages<T> = {
+  loading: string
+  success: string | ((result: T) => string)
+  error: string | ((error: unknown) => string)
+}
+
+const withToast = async <T,>(
+  action: () => Promise<T>,
+  messages: ToastMessages<T>
+): Promise<T> => {
+  return toast.promise(
+    (async () => {
+      try {
+        return await action()
+      } catch (error) {
+        console.error(error)
+        throw error
+      }
+    })(),
+    {
+      loading: messages.loading,
+      success: (result) =>
+        typeof messages.success === "function" ? messages.success(result) : messages.success,
+      error: (error) =>
+        typeof messages.error === "function"
+          ? messages.error(error)
+          : getErrorMessage(error, messages.error),
+    }
+  )
+}
 
 const normaliseState = (incoming: Partial<AppState> | null | undefined): AppState => {
   const today = new Date().toISOString()
@@ -147,51 +231,72 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const addProject = useCallback(
     async (input: ProjectInput) => {
       const trimmedName = input.name.trim()
-      if (!trimmedName) return
-
-      const response = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to create project")
+      if (!trimmedName) {
+        toast.error("Project name is required")
+        return
       }
 
-      await fetchState()
+      await withToast(
+        async () => {
+          const response = await fetch("/api/projects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...input, name: trimmedName }),
+          })
+
+          await ensureResponseSuccess(response, "Failed to create project")
+          await fetchState()
+        },
+        {
+          loading: "Creating project...",
+          success: `Project "${trimmedName}" created`,
+          error: "Failed to create project",
+        }
+      )
     },
     [fetchState]
   )
 
   const updateProject = useCallback(
     async (id: string, updates: Partial<Omit<Project, "id">>) => {
-      const response = await fetch(`/api/projects/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      })
+      await withToast(
+        async () => {
+          const response = await fetch(`/api/projects/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updates),
+          })
 
-      if (!response.ok) {
-        throw new Error("Failed to update project")
-      }
-
-      await fetchState()
+          await ensureResponseSuccess(response, "Failed to update project")
+          await fetchState()
+        },
+        {
+          loading: "Updating project...",
+          success: "Project updated",
+          error: "Failed to update project",
+        }
+      )
     },
     [fetchState]
   )
 
   const deleteProject = useCallback(
     async (id: string) => {
-      const response = await fetch(`/api/projects/${id}`, {
-        method: "DELETE",
-      })
+      await withToast(
+        async () => {
+          const response = await fetch(`/api/projects/${id}`, {
+            method: "DELETE",
+          })
 
-      if (!response.ok) {
-        throw new Error("Failed to delete project")
-      }
-
-      await fetchState()
+          await ensureResponseSuccess(response, "Failed to delete project")
+          await fetchState()
+        },
+        {
+          loading: "Deleting project...",
+          success: "Project deleted",
+          error: "Failed to delete project",
+        }
+      )
     },
     [fetchState]
   )
@@ -208,22 +313,31 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const addTask = useCallback(
     async (input: TaskInput) => {
       const trimmedName = input.name.trim()
-      if (!trimmedName) return
-
-      const response = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...input,
-          name: trimmedName,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to create task")
+      if (!trimmedName) {
+        toast.error("Task name is required")
+        return
       }
 
-      await fetchState()
+      await withToast(
+        async () => {
+          const response = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...input,
+              name: trimmedName,
+            }),
+          })
+
+          await ensureResponseSuccess(response, "Failed to create task")
+          await fetchState()
+        },
+        {
+          loading: "Creating task...",
+          success: `Task "${trimmedName}" created`,
+          error: "Failed to create task",
+        }
+      )
     },
     [fetchState]
   )
@@ -231,20 +345,24 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const updateTask = useCallback(
     async (id: string, updates: Partial<Omit<Task, "id">>) => {
       console.log("[updateTask] Updating task:", id, "with updates:", updates)
-      const response = await fetch(`/api/tasks/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      })
+      await withToast(
+        async () => {
+          const response = await fetch(`/api/tasks/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updates),
+          })
 
-      console.log("[updateTask] Response status:", response.status)
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        console.error("[updateTask] Failed:", errorData)
-        throw new Error("Failed to update task")
-      }
-
-      await fetchState()
+          console.log("[updateTask] Response status:", response.status)
+          await ensureResponseSuccess(response, "Failed to update task")
+          await fetchState()
+        },
+        {
+          loading: "Updating task...",
+          success: "Task updated",
+          error: "Failed to update task",
+        }
+      )
     },
     [fetchState]
   )
@@ -256,6 +374,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
       console.log("[toggleTask] Found task:", task)
       if (!task) {
         console.log("[toggleTask] Task not found in state")
+        toast.error("Task not found")
         return
       }
 
@@ -267,15 +386,21 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 
   const deleteTask = useCallback(
     async (id: string) => {
-      const response = await fetch(`/api/tasks/${id}`, {
-        method: "DELETE",
-      })
+      await withToast(
+        async () => {
+          const response = await fetch(`/api/tasks/${id}`, {
+            method: "DELETE",
+          })
 
-      if (!response.ok) {
-        throw new Error("Failed to delete task")
-      }
-
-      await fetchState()
+          await ensureResponseSuccess(response, "Failed to delete task")
+          await fetchState()
+        },
+        {
+          loading: "Deleting task...",
+          success: "Task deleted",
+          error: "Failed to delete task",
+        }
+      )
     },
     [fetchState]
   )
@@ -283,36 +408,51 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const addTeamMember = useCallback(
     async (input: TeamMemberInput) => {
       const trimmedName = input.name.trim()
-      if (!trimmedName) return
-
-      const response = await fetch("/api/team", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to add team member")
+      if (!trimmedName) {
+        toast.error("Team member name is required")
+        return
       }
 
-      await fetchState()
+      await withToast(
+        async () => {
+          const response = await fetch("/api/team", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...input, name: trimmedName }),
+          })
+
+          await ensureResponseSuccess(response, "Failed to add team member")
+          await fetchState()
+        },
+        {
+          loading: "Adding team member...",
+          success: `Team member "${trimmedName}" added`,
+          error: "Failed to add team member",
+        }
+      )
     },
     [fetchState]
   )
 
   const updateTeamMember = useCallback(
     async (id: string, updates: Partial<Omit<TeamMember, "id">>) => {
-      const response = await fetch(`/api/team/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      })
+      await withToast(
+        async () => {
+          const response = await fetch(`/api/team/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updates),
+          })
 
-      if (!response.ok) {
-        throw new Error("Failed to update team member")
-      }
-
-      await fetchState()
+          await ensureResponseSuccess(response, "Failed to update team member")
+          await fetchState()
+        },
+        {
+          loading: "Updating team member...",
+          success: "Team member updated",
+          error: "Failed to update team member",
+        }
+      )
     },
     [fetchState]
   )
@@ -320,20 +460,25 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
   const deleteTeamMember = useCallback(
     async (id: string) => {
       console.log("[deleteTeamMember] Deleting team member:", id)
-      const response = await fetch(`/api/team/${id}`, {
-        method: "DELETE",
-      })
+      await withToast(
+        async () => {
+          const response = await fetch(`/api/team/${id}`, {
+            method: "DELETE",
+          })
 
-      console.log("[deleteTeamMember] Response status:", response.status)
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        console.error("[deleteTeamMember] Failed:", errorData)
-        throw new Error("Failed to remove team member")
-      }
+          console.log("[deleteTeamMember] Response status:", response.status)
+          await ensureResponseSuccess(response, "Failed to remove team member")
 
-      console.log("[deleteTeamMember] Success! Refreshing state...")
-      await fetchState()
-      console.log("[deleteTeamMember] State refreshed")
+          console.log("[deleteTeamMember] Success! Refreshing state...")
+          await fetchState()
+          console.log("[deleteTeamMember] State refreshed")
+        },
+        {
+          loading: "Removing team member...",
+          success: "Team member removed",
+          error: "Failed to remove team member",
+        }
+      )
     },
     [fetchState]
   )

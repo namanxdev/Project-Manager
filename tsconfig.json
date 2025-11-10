@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "fancycomponents": ["./components/animations/fancycomponents.tsx"]
     }
   },
   "include": [

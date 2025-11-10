@@ -1,10 +1,7 @@
 import type { Metadata } from "next"
-import Link from "next/link"
 import { Geist, Geist_Mono } from "next/font/google"
 
 import "./globals.css"
-import { Providers } from "./providers"
-import { AppHeader } from "@/components/AppHeader"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,9 +14,43 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Studio Project Manager",
+  title: {
+    default: "FormaFlow – Creative Project Management for Designers",
+    template: "%s · FormaFlow",
+  },
   description:
-    "Minimal workspace for architecture studios to manage projects, tasks, and teams.",
+    "FormaFlow is the design-first project management platform that keeps creative teams in flow—asset versioning, annotation feedback, and timelines crafted for modern studios.",
+  keywords: [
+    "design project management",
+    "creative operations",
+    "designer workflow",
+    "visual collaboration",
+    "creative project tracking",
+  ],
+  openGraph: {
+    title: "FormaFlow – Creative Project Management for Designers",
+    description:
+      "Shape ideas to delivery with asset versioning, live annotations, and timelines crafted for creative teams.",
+    url: "https://forma-flow.example.com",
+    siteName: "FormaFlow",
+    images: [
+      {
+        url: "/og-formaflow.png",
+        width: 1200,
+        height: 630,
+        alt: "FormaFlow collaborative design dashboard interface",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "FormaFlow – Creative Project Management for Designers",
+    description:
+      "Creative project management that speaks the language of design teams—version control, annotations, and timelines in one crafted workspace.",
+    images: ["/og-formaflow.png"],
+  },
 }
 
 export default function RootLayout({
@@ -28,29 +59,11 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-background font-sans antialiased`}>
-        <Providers>
-          <div className="flex min-h-screen flex-col bg-muted/20 text-foreground">
-            <AppHeader />
-            <main className="flex-1">
-              <div className="mx-auto w-full max-w-6xl px-4 pb-16 pt-10">{children}</div>
-            </main>
-            <footer className="border-t bg-background py-6">
-              <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-3 px-4 text-xs text-muted-foreground sm:flex-row">
-                <span>© {new Date().getFullYear()} Studio Project Manager. Ship better projects together.</span>
-                <nav className="flex items-center gap-4">
-                  <Link href="/" className="transition hover:text-foreground">
-                    Projects
-                  </Link>
-                  <Link href="/team" className="transition hover:text-foreground">
-                    Team
-                  </Link>
-                </nav>
-              </div>
-            </footer>
-          </div>
-        </Providers>
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-background font-sans text-foreground antialiased`}
+      >
+        {children}
       </body>
     </html>
   )

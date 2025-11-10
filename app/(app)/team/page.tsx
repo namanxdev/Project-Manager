@@ -3,17 +3,45 @@
 import { useMemo, useState } from "react"
 
 import { TeamCard } from "@/components/TeamCard"
+import { TeamMemberForm, type TeamMemberFormState } from "@/components/TeamMemberForm"
+import { Modal } from "@/components/ui/modal"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Button } from "@/components/ui/button"
 import { useAppContext } from "@/context/AppContext"
 
-const createEmptyForm = () => ({
+const createEmptyForm = (): TeamMemberFormState => ({
   name: "",
   role: "",
   capacity: "",
 })
+
+type TeamMemberPayload = {
+  name: string
+  role?: string
+  capacity?: number
+}
+
+const toPayload = (form: TeamMemberFormState): TeamMemberPayload | null => {
+  const name = form.name.trim()
+  if (!name) return null
+
+  const roleValue = form.role.trim()
+  const hasCapacity = form.capacity.trim().length > 0
+
+  let capacityValue: number | undefined
+  if (hasCapacity) {
+    const parsed = Number(form.capacity)
+    if (!Number.isFinite(parsed)) {
+      return null
+    }
+    capacityValue = parsed
+  }
+
+  return {
+    name,
+    role: roleValue || undefined,
+    capacity: capacityValue,
+  }
+}
 
 export default function TeamPage() {
   const {
@@ -25,9 +53,10 @@ export default function TeamPage() {
     deleteTeamMember,
   } = useAppContext()
 
-  const [form, setForm] = useState(createEmptyForm)
+  const [createForm, setCreateForm] = useState(createEmptyForm)
+  const [editForm, setEditForm] = useState(createEmptyForm)
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null)
-  const isEditing = editingMemberId != null
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   const teamWithStats = useMemo(() => {
     const byMember = new Map<string, { assigned: number; completed: number }>()
@@ -44,45 +73,43 @@ export default function TeamPage() {
     })
   }, [tasks, team])
 
-  const resetForm = () => {
-    setForm(createEmptyForm())
-    setEditingMemberId(null)
+  const resetCreateForm = () => {
+    setCreateForm(createEmptyForm())
   }
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const resetEditState = () => {
+    setEditForm(createEmptyForm())
+    setEditingMemberId(null)
+    setIsModalOpen(false)
+  }
+
+  const handleCreateSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!form.name.trim()) return
+    const payload = toPayload(createForm)
+    if (!payload) return
+    await addTeamMember(payload)
+    resetCreateForm()
+  }
 
-    const hasCapacity = form.capacity.trim().length > 0
-    const capacityValue = hasCapacity ? Number(form.capacity) : undefined
-
-    if (hasCapacity && (capacityValue == null || Number.isNaN(capacityValue))) {
-      return
-    }
-
-    const payload = {
-      name: form.name.trim(),
-      role: form.role.trim() || undefined,
-      capacity: capacityValue,
-    }
-
-    if (isEditing && editingMemberId) {
-      await updateTeamMember(editingMemberId, payload)
-    } else {
-      await addTeamMember(payload)
-    }
-    resetForm()
+  const handleEditSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!editingMemberId) return
+    const payload = toPayload(editForm)
+    if (!payload) return
+    await updateTeamMember(editingMemberId, payload)
+    resetEditState()
   }
 
   const handleEdit = (memberId: string) => {
     const member = team.find((item) => item.id === memberId)
     if (!member) return
     setEditingMemberId(member.id)
-    setForm({
+    setEditForm({
       name: member.name,
       role: member.role ?? "",
       capacity: member.capacity != null ? String(member.capacity) : "",
     })
+    setIsModalOpen(true)
   }
 
   const handleDelete = async (memberId: string) => {
@@ -94,7 +121,7 @@ export default function TeamPage() {
     if (!confirmed) return
     await deleteTeamMember(memberId)
     if (editingMemberId === memberId) {
-      resetForm()
+      resetEditState()
     }
   }
 
@@ -145,58 +172,17 @@ export default function TeamPage() {
         <Card className="h-fit">
           <CardHeader>
             <CardTitle className="text-lg">
-              {isEditing ? "Update teammate" : "Add a teammate"}
+              Add a teammate
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              <div className="space-y-2">
-                <Label htmlFor="member-name">Name</Label>
-                <Input
-                  id="member-name"
-                  value={form.name}
-                  onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Alex, Priya, Malik..."
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="member-role">Role</Label>
-                <Input
-                  id="member-role"
-                  value={form.role}
-                  onChange={(event) => setForm((prev) => ({ ...prev, role: event.target.value }))}
-                  placeholder="Project architect, BIM lead..."
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="member-capacity">Weekly capacity (tasks)</Label>
-                <Input
-                  id="member-capacity"
-                  type="number"
-                  min={0}
-                  value={form.capacity}
-                  onChange={(event) => setForm((prev) => ({ ...prev, capacity: event.target.value }))}
-                  placeholder="6"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                {isEditing ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={resetForm}
-                  >
-                    Cancel
-                  </Button>
-                ) : (
-                  <span className="text-xs text-muted-foreground">
-                    Keep everyone’s capacity realistic to prevent burnout.
-                  </span>
-                )}
-                <Button type="submit">{isEditing ? "Save changes" : "Add teammate"}</Button>
-              </div>
-            </form>
+            <TeamMemberForm
+              mode="create"
+              values={createForm}
+              onChange={(next) => setCreateForm(next)}
+              onSubmit={handleCreateSubmit}
+              helperText="Keep everyone's capacity realistic to prevent burnout."
+            />
           </CardContent>
         </Card>
       </section>
@@ -219,6 +205,32 @@ export default function TeamPage() {
           ))}
         </div>
       )}
+
+      <Modal
+        isOpen={isModalOpen}
+        onClose={resetEditState}
+        labelledBy="edit-teammate-title"
+      >
+        <Card>
+          <CardHeader>
+            <CardTitle
+              id="edit-teammate-title"
+              className="text-lg"
+            >
+              Update teammate
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TeamMemberForm
+              mode="edit"
+              values={editForm}
+              onChange={(next) => setEditForm(next)}
+              onSubmit={handleEditSubmit}
+              onCancel={resetEditState}
+            />
+          </CardContent>
+        </Card>
+      </Modal>
     </div>
   )
 }
